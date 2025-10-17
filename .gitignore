@@ -1,0 +1,4 @@
+llvm-tutor-testing/llvm-tutor/
+llvm-tutor-testing/build/
+input_for_*.ll
+output_from_*.ll
