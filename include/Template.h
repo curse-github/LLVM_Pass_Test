@@ -22,14 +22,17 @@
 
 // inherits from llvm::PassInfoMixin for transfomation passes
 // use llvm::InfoAnalysisMixin for analysis passes
-struct DuplicateB : public llvm::PassInfoMixin<DuplicateB> {
-    std::unique_ptr<llvm::RandomNumberGenerator> RngGen;
+struct Template : public llvm::PassInfoMixin<Template> {
     static bool isRequired() { return true; }
 
+    Template() = default;
+    Template(const Template& copy) = delete;
+    Template& operator=(const Template& copy) = delete;
+    Template(Template&& move) = delete;
+    Template& operator=(Template&& move) = delete;
+    ~Template() = default;
+
     llvm::PreservedAnalyses run(llvm::Function& F, llvm::FunctionAnalysisManager&);
-    std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> findDuplicatableBs(llvm::Function& F, const RIV::Result& RIVResult);
-    void duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::map<llvm::Value*, llvm::Value*>& ValRe_mapper);
-    unsigned DuplicateBBCount = 0;
 };
 
 #endif// __DUPLICATE_B

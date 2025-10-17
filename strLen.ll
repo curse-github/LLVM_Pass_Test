@@ -8,7 +8,7 @@ define dso_local i32 @main(i32 %argc, ptr %argv) local_unnamed_addr #0 {
     br i1 %cond1, label %argError1, label %getStr
 argError1:
     tail call void @printStr(ptr @Str1)
-    br label %errorRet
+    br label %mainRet
 getStr:
     ; char* str = argv[1]
     %strPP = getelementptr [2 x ptr], ptr %argv, i64 0, i64 1
@@ -16,8 +16,6 @@ getStr:
     %strLen = tail call i32 @strLen(ptr noundef %strP)
     tail call void @printlnUInt(i32 noundef %strLen)
     br label %mainRet
-errorRet:
-    ret i32 1
 mainRet:
     ret i32 0
 }

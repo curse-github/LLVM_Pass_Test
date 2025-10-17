@@ -1,93 +1,110 @@
 #include "DuplicateB.h"
+#include <iostream>
 
-#define DEBUG_TYPE "duplicate-bb"
-STATISTIC(DuplicateBBCountStats, "The # of duplicated blocks");
-
-std::vector<std::tuple<llvm::BasicBlock *, llvm::Value *>>
-DuplicateB::findBBsToDuplicate(llvm::Function& F, const RIV::Result& RIVResult) {
-    std::vector<std::tuple<llvm::BasicBlock *, llvm::Value *>> BlocksToDuplicate;
-    for (llvm::BasicBlock& BB : F) {
-        if (BB.isLandingPad())
+std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> DuplicateB::findDuplicatableBs(llvm::Function& F, const RIV::Result& RIVResult) {
+    std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> BlocksToDuplicate;
+    // loop through each block in that function
+    for (llvm::BasicBlock& B : F) {
+        // skip excpetion
+        if (B.isLandingPad())
             continue;
-        const llvm::SmallPtrSet<llvm::Value *, 8U>& ReachableValues = RIVResult.lookup(&BB);
+        // fetch the reachable integer values (RIV)
+        const llvm::SmallPtrSet<llvm::Value *, 8U>& ReachableValues = RIVResult.lookup(&B);
+        // if there isnt any, skip that block
         size_t ReachableValuesCount = ReachableValues.size();
-        if (0 == ReachableValuesCount) {
-            LLVM_DEBUG(llvm::errs() << "No context values for this BB\n");
+        if (0 == ReachableValuesCount)
             continue;
-        }
+        // get a random one of the reachable values
         llvm::SmallPtrSetIterator<llvm::Value *> Iter = ReachableValues.begin();
         std::uniform_int_distribution<> Dist(0, ReachableValuesCount - 1);
-        std::advance(Iter, Dist(*pRNG));
-        if (llvm::dyn_cast<llvm::GlobalValue>(*Iter)) {
-            LLVM_DEBUG(llvm::errs() << "Random context value is a global variable. " << "Skipping this BB\n");
+        std::advance(Iter, Dist(*RngGen));
+        if (llvm::dyn_cast<llvm::GlobalValue>(*Iter))
             continue;
-        }
-        LLVM_DEBUG(llvm::errs() << "Random context value: " <<* *Iter << "\n");
-        BlocksToDuplicate.emplace_back(&BB,* Iter);
+        // push a pair of the 
+        BlocksToDuplicate.emplace_back(&B, *Iter);
     }
     return BlocksToDuplicate;
 }
-void DuplicateB::cloneBB(llvm::BasicBlock& BB, llvm::Value* ContextValue, std::map<llvm::Value*, llvm::Value *>& ReMapper) {
-    llvm::BasicBlock::iterator BBHead = BB.getFirstNonPHIIt();
-    llvm::IRBuilder<> Builder(&*BBHead);
-    llvm::Value* Cond = Builder.CreateIsNull(ReMapper.count(ContextValue) ? ReMapper[ContextValue] : ContextValue);
-    llvm::Instruction* ThenTerm = nullptr;
-    llvm::Instruction* ElseTerm = nullptr;
-    SplitBlockAndInsertIfThenElse(Cond, &*BBHead, &ThenTerm, &ElseTerm);
-    llvm::BasicBlock* Tail = ThenTerm->getSuccessor(0);
-    assert(Tail == ElseTerm->getSuccessor(0) && "Inconsistent CFG");
-    std::string DuplicatedBBId = std::to_string(DuplicateBBCount);
-    ThenTerm->getParent()->setName("lt-clone-1-" + DuplicatedBBId);
-    ElseTerm->getParent()->setName("lt-clone-2-" + DuplicatedBBId);
-    Tail->setName("lt-tail-" + DuplicatedBBId);
-    ThenTerm->getParent()->getSinglePredecessor()->setName("lt-if-then-else-" + DuplicatedBBId);
-    llvm::ValueToValueMapTy TailVMap, ThenVMap, ElseVMap;
+void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::map<llvm::Value*, llvm::Value*>& ValRe_mapper) {
+    llvm::Instruction* Btop = &*(B->getFirstNonPHIIt());
+    llvm::Twine BName = ""+B->getName();
+    llvm::IRBuilder<> Builder(&*Btop);
+    // create if else block at the location of the target value, or what the target value has now changed to
+    llvm::Value* Cond = Builder.CreateIsNull((ValRe_mapper.count(TargetVal) > 0) ? ValRe_mapper[TargetVal] : TargetVal);
+    llvm::Instruction* ifTerminator = nullptr;
+    llvm::Instruction* elseTerminator = nullptr;
+    SplitBlockAndInsertIfThenElse(Cond, &*Btop, &ifTerminator, &elseTerminator);
+    llvm::BasicBlock* headBranch = ifTerminator->getParent()->getSinglePredecessor();
+    llvm::BasicBlock* ifBranch = ifTerminator->getParent();
+    llvm::BasicBlock* elseBranch = elseTerminator->getParent();
+    llvm::BasicBlock* tailBranch = elseTerminator->getSuccessor(0);
+    headBranch->setName(BName + ".head");// getSinglePredecessor will return nullptr if there is more than one
+    ifBranch->setName(BName + ".if");
+    elseBranch->setName(BName + ".else");
+    tailBranch->setName(BName + ".tail");
+    // loop through instructions in tail which just contains the original data of the block
+    llvm::ValueToValueMapTy fullValMap{}, ifValMap{}, ElseValMap{};
     llvm::SmallVector<llvm::Instruction*, 8> ToRemove;
-    for (llvm::BasicBlock::iterator IIT = Tail->begin(), IE = Tail->end(); IIT != IE; ++IIT) {
+    llvm::BasicBlock::iterator IE = tailBranch->end();
+    for (llvm::BasicBlock::iterator IIT = tailBranch->begin(); IIT != IE; ++IIT) {
+        // get instruction
         llvm::Instruction* Instr = &*IIT;
         assert(!llvm::isa<llvm::PHINode>(Instr) && "Phi nodes have already been filtered out");
+        // if it is the terminator, leave it in the tail branch
         if (Instr->isTerminator()) {
-            RemapInstruction(Instr, TailVMap, llvm::RF_IgnoreMissingLocals);
-            continue;
+            llvm::RemapInstruction(Instr, fullValMap, llvm::RF_IgnoreMissingLocals);
+            break;
         }
-        llvm::Instruction* ThenClone = Instr->clone();
-        llvm::Instruction* ElseClone = Instr->clone();
-        RemapInstruction(ThenClone, ThenVMap, llvm::RF_IgnoreMissingLocals);
-        ThenClone->insertBefore(ThenTerm->getIterator());
-        ThenVMap[Instr] = ThenClone;
-        RemapInstruction(ElseClone, ElseVMap, llvm::RF_IgnoreMissingLocals);
-        ElseClone->insertBefore(ElseTerm->getIterator());
-        ElseVMap[Instr] = ElseClone;
-        if (ThenClone->getType()->isVoidTy()) {
+        // clone and re-map using already cloned values
+        llvm::Instruction* ifClone = Instr->clone();
+        llvm::RemapInstruction(ifClone, ifValMap, llvm::RF_IgnoreMissingLocals);
+        // add to end of if block and insert in map
+        ifClone->insertBefore(ifTerminator);
+        ifValMap[Instr] = ifClone;
+
+        // clone and re-map using already cloned values
+        llvm::Instruction* elseClone = Instr->clone();
+        llvm::RemapInstruction(elseClone, ElseValMap, llvm::RF_IgnoreMissingLocals);
+        // add to end of else block and insert in map
+        elseClone->insertBefore(elseTerminator);
+        ElseValMap[Instr] = elseClone;
+
+        // if the instruction returns void just duplicate it, dont need phi instruction
+        if (Instr->getType()->isVoidTy()) {
             ToRemove.push_back(Instr);
             continue;
         }
-        llvm::PHINode* Phi = llvm::PHINode::Create(ThenClone->getType(), 2);
-        Phi->addIncoming(ThenClone, ThenTerm->getParent());
-        Phi->addIncoming(ElseClone, ElseTerm->getParent());
-        TailVMap[Instr] = Phi;
-        ReMapper[Instr] = Phi;
-        ReplaceInstWithInst(Tail, IIT, Phi);
+        // set clone's names
+        llvm::StringRef instrName = Instr->getName();
+        ifClone->setName(instrName + ".if");
+        elseClone->setName(instrName + ".else");
+        // eplace original statement in tail with phi of two cloned values
+        llvm::PHINode* Phi = llvm::PHINode::Create(Instr->getType(), 2);
+        Phi->addIncoming(ifClone, ifBranch);
+        Phi->addIncoming(elseClone, elseBranch);
+        ReplaceInstWithInst(tailBranch, IIT, Phi);
+        // save phi instruction to replace the original in other places
+        ValRe_mapper[Instr] = fullValMap[Instr] = Phi;
     }
     for (llvm::Instruction* I : ToRemove)
         I->eraseFromParent();
-    ++DuplicateBBCount;
 }
 llvm::PreservedAnalyses DuplicateB::run(llvm::Function& F, llvm::FunctionAnalysisManager& FAM) {
-    if (!pRNG)
-        pRNG = F.getParent()->createRNG("duplicate-bb");
-    std::vector<std::tuple<llvm::BasicBlock*, llvm::Value*>> Targets = findBBsToDuplicate(F, FAM.getResult<RIV>(F));
-    std::map<llvm::Value*, llvm::Value*> ReMapper;
-    for (std::tuple<llvm::BasicBlock*, llvm::Value*>& BB_Ctx : Targets)
-        cloneBB(*std::get<0>(BB_Ctx), std::get<1>(BB_Ctx), ReMapper);
-    DuplicateBBCountStats = DuplicateBBCount;
-    return (Targets.empty() ? llvm::PreservedAnalyses::all() : llvm::PreservedAnalyses::none());
+    // create a randmon number generator
+    if (!RngGen)
+        RngGen = F.getParent()->createRNG("duplicate-b");
+    // call the findDuplicatableBs function to find blocks to then duplicate
+    std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> B_Tgt_s = findDuplicatableBs(F, FAM.getResult<RIV>(F));
+    std::map<llvm::Value*, llvm::Value*> ValRe_mapper;
+    for (std::pair<llvm::BasicBlock*, llvm::Value*>& B_Tgt : B_Tgt_s)
+        duplicateB(B_Tgt.first, B_Tgt.second, ValRe_mapper);
+    return (B_Tgt_s.empty() ? llvm::PreservedAnalyses::all() : llvm::PreservedAnalyses::none());
 }
-llvm::PassPluginLibraryInfo getDuplicateBBPluginInfo() {
+llvm::PassPluginLibraryInfo getDuplicateBPluginInfo() {
     return {
         LLVM_PLUGIN_API_VERSION, "DuplicateB", LLVM_VERSION_STRING,
-        [](llvm::PassBuilder& PB) {
-            PB.registerPipelineParsingCallback(
+        [](llvm::PassBuilder& passBuilder) {
+            passBuilder.registerPipelineParsingCallback(
                 [](
                     llvm::StringRef Name, llvm::FunctionPassManager& FPM,
                     llvm::ArrayRef<llvm::PassBuilder::PipelineElement>
@@ -104,5 +121,5 @@ llvm::PassPluginLibraryInfo getDuplicateBBPluginInfo() {
 }
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
-    return getDuplicateBBPluginInfo();
+    return getDuplicateBPluginInfo();
 }

@@ -28,8 +28,7 @@ struct RIV : public llvm::AnalysisInfoMixin<RIV> {
   using Result = llvm::MapVector<llvm::BasicBlock const *,
                                  llvm::SmallPtrSet<llvm::Value *, 8>>;
   Result run(llvm::Function &F, llvm::FunctionAnalysisManager &);
-  Result buildRIV(llvm::Function &F,
-                  llvm::DomTreeNodeBase<llvm::BasicBlock> *CFGRoot);
+  Result buildRIV(llvm::Function &F, llvm::DomTreeNodeBase<llvm::BasicBlock> *CFGRoot);
 
 private:
   // A special type used by analysis passes to provide an address that
