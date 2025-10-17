@@ -65,8 +65,8 @@ echo "    Success"
 echo "------------------------------------------------------"
 echo -e "libMergeBB:"
 echo "------------------------------------------------------"
-opt -load-pass-plugin=./build/lib/libRIV.so -load-pass-plugin=./build/lib/libMergeBB.so -load-pass-plugin=./build/lib/libDuplicateBB.so -passes=duplicate-bb,merge-bb ./tmp/input_for_duplicate_bb.ll -S -o ./tmp/output_from_merge_bb.ll && \
-opt -load-pass-plugin=./build/lib/libRIV.so -load-pass-plugin=./build/lib/libMergeBB.so -load-pass-plugin=./build/lib/libDuplicateBB.so -passes=duplicate-bb,duplicate-bb,merge-bb ./tmp/input_for_duplicate_bb.ll -S -o ./tmp/output_from_merge_bbbb.ll && \
+opt -load-pass-plugin=./build/lib/libRIV.so -load-pass-plugin=./build/lib/libMergeBB.so -load-pass-plugin=./build/lib/libDuplicateBB.so -passes=merge-bb ./tmp/output_from_duplicate_bb.ll -S -o ./tmp/output_from_merge_bb.ll && \
+opt -load-pass-plugin=./build/lib/libRIV.so -load-pass-plugin=./build/lib/libMergeBB.so -load-pass-plugin=./build/lib/libDuplicateBB.so -passes=merge-bb ./tmp/output_from_duplicate_bbbb.ll -S -o ./tmp/output_from_merge_bbbb.ll && \
 echo "    Success"
 echo "------------------------------------------------------"
 echo -e "\n\n\nlibFindFCmpEq:"
