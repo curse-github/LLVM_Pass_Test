@@ -42,7 +42,7 @@ build: mkdir ./src/MergeB.cpp
 	@clang++ -fPIC -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -fdeclspec -std=c++23 -O3 $(libs) -I$(includedir) -I./include ./src/DuplicateB.cpp -shared -o ./out/libDuplicateB.so
 	@-echo finished building libDuplicateB.so
 	@-echo building libMergeB.so
-	@clang++ -fPIC -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -fdeclspec -std=c++23 -O3 $(libs) -I$(includedir) -I./include ./src/MergeB.cpp -shared -o ./out/libMergeB.so
+	@clang++ -fPIC -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -Wno-unused-variable -fdeclspec -std=c++23 -O3 $(libs) -I$(includedir) -I./include ./src/MergeB.cpp -shared -o ./out/libMergeB.so
 	@-echo finished building libMergeB.so
 .phony : build
 mkdir:

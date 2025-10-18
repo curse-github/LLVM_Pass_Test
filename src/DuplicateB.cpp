@@ -24,7 +24,7 @@ std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> DuplicateB::findDuplicat
     }
     return BlocksToDuplicate;
 }
-void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::map<llvm::Value*, llvm::Value*>& ValRe_mapper) {
+void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::unordered_map<llvm::Value*, llvm::Value*>& ValRe_mapper) {
     llvm::Instruction* Btop = &*(B->getFirstNonPHIIt());
     llvm::Twine BName = ""+B->getName();
     llvm::IRBuilder<> Builder(&*Btop);
@@ -76,7 +76,7 @@ void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::ma
         }
         // set clone's names
         llvm::StringRef instrName = Instr->getName();
-        ifClone->setName(instrName + ".if");
+        ifClone->setName(instrName);
         elseClone->setName(instrName + ".else");
         // eplace original statement in tail with phi of two cloned values
         llvm::PHINode* Phi = llvm::PHINode::Create(Instr->getType(), 2);
@@ -95,7 +95,7 @@ llvm::PreservedAnalyses DuplicateB::run(llvm::Function& F, llvm::FunctionAnalysi
         RngGen = F.getParent()->createRNG("duplicate-b");
     // call the findDuplicatableBs function to find blocks to then duplicate
     std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> B_Tgt_s = findDuplicatableBs(F, FAM.getResult<RIV>(F));
-    std::map<llvm::Value*, llvm::Value*> ValRe_mapper;
+    std::unordered_map<llvm::Value*, llvm::Value*> ValRe_mapper;
     for (std::pair<llvm::BasicBlock*, llvm::Value*>& B_Tgt : B_Tgt_s)
         duplicateB(B_Tgt.first, B_Tgt.second, ValRe_mapper);
     return (B_Tgt_s.empty() ? llvm::PreservedAnalyses::all() : llvm::PreservedAnalyses::none());
