@@ -1,5 +1,4 @@
 #include "DuplicateB.h"
-#include <iostream>
 
 std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> DuplicateB::findDuplicatableBs(llvm::Function& F, const RIV::Result& RIVResult) {
     std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> BlocksToDuplicate;
@@ -31,18 +30,19 @@ void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::ma
     llvm::IRBuilder<> Builder(&*Btop);
     // create if else block at the location of the target value, or what the target value has now changed to
     llvm::Value* Cond = Builder.CreateIsNull((ValRe_mapper.count(TargetVal) > 0) ? ValRe_mapper[TargetVal] : TargetVal);
-    llvm::Instruction* ifTerminator = nullptr;
-    llvm::Instruction* elseTerminator = nullptr;
-    SplitBlockAndInsertIfThenElse(Cond, &*Btop, &ifTerminator, &elseTerminator);
-    llvm::BasicBlock* headBranch = ifTerminator->getParent()->getSinglePredecessor();
-    llvm::BasicBlock* ifBranch = ifTerminator->getParent();
-    llvm::BasicBlock* elseBranch = elseTerminator->getParent();
-    llvm::BasicBlock* tailBranch = elseTerminator->getSuccessor(0);
-    headBranch->setName(BName + ".head");// getSinglePredecessor will return nullptr if there is more than one
+    llvm::Instruction* ifTerm = nullptr;
+    llvm::Instruction* elseTerm = nullptr;
+    SplitBlockAndInsertIfThenElse(Cond, &*Btop, &ifTerm, &elseTerm);
+    llvm::BasicBlock* headBranch = ifTerm->getParent()->getSinglePredecessor();
+    llvm::BasicBlock* ifBranch = ifTerm->getParent();
+    llvm::BasicBlock* elseBranch = elseTerm->getParent();
+    llvm::BasicBlock* tailBranch = elseTerm->getSuccessor(0);
+    headBranch->setName(BName);// getSinglePredecessor will return nullptr if there is more than one
     ifBranch->setName(BName + ".if");
     elseBranch->setName(BName + ".else");
     tailBranch->setName(BName + ".tail");
     // loop through instructions in tail which just contains the original data of the block
+    // duplicate each instruction into the two branches except the terminator instruction
     llvm::ValueToValueMapTy fullValMap{}, ifValMap{}, ElseValMap{};
     llvm::SmallVector<llvm::Instruction*, 8> ToRemove;
     llvm::BasicBlock::iterator IE = tailBranch->end();
@@ -50,7 +50,7 @@ void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::ma
         // get instruction
         llvm::Instruction* Instr = &*IIT;
         assert(!llvm::isa<llvm::PHINode>(Instr) && "Phi nodes have already been filtered out");
-        // if it is the terminator, leave it in the tail branch
+        // if it is the Term, leave it in the tail branch
         if (Instr->isTerminator()) {
             llvm::RemapInstruction(Instr, fullValMap, llvm::RF_IgnoreMissingLocals);
             break;
@@ -59,14 +59,14 @@ void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::ma
         llvm::Instruction* ifClone = Instr->clone();
         llvm::RemapInstruction(ifClone, ifValMap, llvm::RF_IgnoreMissingLocals);
         // add to end of if block and insert in map
-        ifClone->insertBefore(ifTerminator);
+        ifClone->insertBefore(ifTerm);
         ifValMap[Instr] = ifClone;
 
         // clone and re-map using already cloned values
         llvm::Instruction* elseClone = Instr->clone();
         llvm::RemapInstruction(elseClone, ElseValMap, llvm::RF_IgnoreMissingLocals);
         // add to end of else block and insert in map
-        elseClone->insertBefore(elseTerminator);
+        elseClone->insertBefore(elseTerm);
         ElseValMap[Instr] = elseClone;
 
         // if the instruction returns void just duplicate it, dont need phi instruction

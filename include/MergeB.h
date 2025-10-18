@@ -16,22 +16,26 @@
 // inherits from llvm::PassInfoMixin for transfomation passes
 // use llvm::InfoAnalysisMixin for analysis passes
 struct MergeB : public llvm::PassInfoMixin<MergeB> {
-    llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager&);
-    bool canRemoveInst(const llvm::Instruction* Inst);
-    bool canMergeInstructions(llvm::ArrayRef<llvm::Instruction*> Insts);
-    unsigned updateBranchTargets(llvm::BasicBlock* BBToErase, llvm::BasicBlock* BBToRetain);
-    bool mergeDuplicatedBlock(llvm::BasicBlock* BB, llvm::SmallPtrSet<llvm::BasicBlock*, 8> &DeleteList);
     static bool isRequired() { return true; }
+
+    llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager&);
+    bool attemptMerge(llvm::BasicBlock* BB, llvm::SmallPtrSet<llvm::BasicBlock*, 8> &DeleteList);
+    bool canMergeBlocks(llvm::BasicBlock* B1, llvm::BasicBlock* B2);
+    bool canMergeInstructions(llvm::ArrayRef<llvm::Instruction*> Insts);
+    bool canRemoveInst(const llvm::Instruction* Inst);
+    void updatePredecessorTerminator(llvm::BasicBlock* BToErase, llvm::BasicBlock* BToRetain);
 };
 
+unsigned int countNonDbgInstrInBB(llvm::BasicBlock* BB);
+llvm::Instruction* getLastNonDbgInst(llvm::BasicBlock* BB);
+
 class LockstepReverseIterator {
-    llvm::BasicBlock* BB1;
-    llvm::BasicBlock* BB2;
+    llvm::BasicBlock* B1;
+    llvm::BasicBlock* B2;
     llvm::SmallVector<llvm::Instruction*, 2> Insts;
     bool Fail;
 public:
-    LockstepReverseIterator(llvm::BasicBlock* BB1In, llvm::BasicBlock* BB2In);
-    llvm::Instruction* getLastNonDbgInst(llvm::BasicBlock* BB);
+    LockstepReverseIterator(llvm::BasicBlock* B1In, llvm::BasicBlock* B2In);
     bool isValid() const { return !Fail; }
     void operator--();
     llvm::ArrayRef<llvm::Instruction* > operator*() const { return Insts; }
