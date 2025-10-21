@@ -4,8 +4,8 @@ target datalayout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i64:64-f80:64
 
 define dso_local i32 @main(i32 %argc, ptr %argv) local_unnamed_addr #0 {
     ; if (argc < 2) throw std::runtime_error(Str1)
-    %cond1 = icmp ult i32 %argc, 2
-    br i1 %cond1, label %argError1, label %getStr
+    %errCond = icmp ult i32 %argc, 2
+    br i1 %errCond, label %argError1, label %getStr
 argError1:
     tail call void @printStr(ptr @Str1)
     br label %mainRet
@@ -28,8 +28,8 @@ loop:
     %len.0 = load i32, ptr %lenP
     %chrP = getelementptr [0 x i8], ptr %strP, i64 0, i32 %len.0
     %chr = load i8, ptr %chrP
-    %cond = icmp eq i8 %chr, 0
-    br i1 %cond, label %ret, label %loopInner
+    %loopCond = icmp eq i8 %chr, 0
+    br i1 %loopCond, label %ret, label %loopInner
 loopInner:
     %len.1 = add i32 %len.0, 1
     store i32 %len.1, ptr %lenP

@@ -19,16 +19,19 @@ struct MergeB : public llvm::PassInfoMixin<MergeB> {
 
     llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager&);
 
-    bool attemptMerge(llvm::BasicBlock* B, llvm::SmallPtrSet<llvm::BasicBlock*, 8> &DeleteList);
-    bool canMergeBlocks(llvm::BasicBlock* B1, llvm::BasicBlock* B2, std::unordered_map<llvm::Value*, llvm::Value*>& PhiMap);
-    bool canMergeInstructions(llvm::ArrayRef<llvm::Instruction*> Insts, std::unordered_map<llvm::Value*, llvm::Value*>& PhiMap);
-    bool canRemoveInst(const llvm::Instruction* Inst);
+    unsigned int attemptMerge(llvm::BasicBlock* B);
+    bool canMergeBlocks(llvm::BasicBlock* B1, llvm::BasicBlock* B2, std::unordered_map<llvm::PHINode*, llvm::Value*>& phiToInst);
+    bool canMergeInstructions(llvm::Instruction* Inst1, llvm::BasicBlock* B1, llvm::Instruction* Inst2, llvm::BasicBlock* B2, std::unordered_map<llvm::Value*, llvm::PHINode*>& instToPhi, std::unordered_map<llvm::PHINode*, llvm::Value*>& phiToInst);
     void updatePredecessorTerminator(llvm::BasicBlock* BToErase, llvm::BasicBlock* BToRetain);
 
-    bool mergeUnconditionalConditionBranches(llvm::BasicBlock& B);
+    unsigned int makeConditionalBranchesUnconditional(llvm::BasicBlock& B);
+
+    unsigned int mergeSinglePredecessorUnconditionalBranches(llvm::Function& F);
+
+    unsigned int MergeB::removeNoUseInstructions(llvm::Function& F);
 };
 
 unsigned int countNonDbgInstrInB(llvm::BasicBlock* B);
-llvm::Instruction* getLastNonDbgInst(llvm::BasicBlock* B);
+bool hasPredecessors(llvm::BasicBlock* B);
 
 #endif// __MERGE_B

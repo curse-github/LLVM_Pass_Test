@@ -3,10 +3,9 @@ includedir = $(shell llvm-config-21 --includedir)
 libs = $(shell llvm-config-21 --link-static --ldflags --libs core passes)
 test: mkdir build lib
 	@cp ./strLen.ll ./tmp/input_for_passes.ll
-	@-echo -e running RIV.so plugin on input_for_passes.ll
-	@opt -load-pass-plugin=./llvm-tutor-testing/build/lib/libRIV.so -p="print<riv>" ./tmp/input_for_passes.ll -disable-output
 	@-echo running DuplicateB.so plugin on input_for_passes.ll
 	@opt -load-pass-plugin=./llvm-tutor-testing/build/lib/libRIV.so -load-pass-plugin=./out/libDuplicateB.so -p=duplicate-b ./tmp/input_for_passes.ll -S -o ./tmp/output_from_duplicate.ll
+	@opt -load-pass-plugin=./llvm-tutor-testing/build/lib/libRIV.so -load-pass-plugin=./out/libDuplicateB.so -p=duplicate-b ./tmp/output_from_duplicate.ll -S -o ./tmp/output_from_duplicate.ll
 	@-echo running MergeB.so plugin on output_from_duplicate.ll
 	@opt -load-pass-plugin=./out/libMergeB.so -p=merge-b ./tmp/output_from_duplicate.ll -S -o ./tmp/output_from_merge.ll
 
@@ -42,7 +41,7 @@ build: mkdir ./src/MergeB.cpp
 	@clang++ -fPIC -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -fdeclspec -std=c++23 -O3 $(libs) -I$(includedir) -I./include ./src/DuplicateB.cpp -shared -o ./out/libDuplicateB.so
 	@-echo finished building libDuplicateB.so
 	@-echo building libMergeB.so
-	@clang++ -fPIC -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -Wno-unused-variable -fdeclspec -std=c++23 -O3 $(libs) -I$(includedir) -I./include ./src/MergeB.cpp -shared -o ./out/libMergeB.so
+	@clang++ -fPIC -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -fdeclspec -std=c++23 -O3 $(libs) -I$(includedir) -I./include ./src/MergeB.cpp -shared -o ./out/libMergeB.so
 	@-echo finished building libMergeB.so
 .phony : build
 mkdir:

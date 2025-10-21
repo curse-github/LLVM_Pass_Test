@@ -1,5 +1,19 @@
 #include "DuplicateB.h"
 
+llvm::PreservedAnalyses DuplicateB::run(llvm::Function& F, llvm::FunctionAnalysisManager& FAM) {
+    if (F.getName() != "main") return llvm::PreservedAnalyses::all();
+    // create a randmon number generator
+    if (!RngGen)
+        RngGen = F.getParent()->createRNG("duplicate-b");
+    // call the findDuplicatableBs function to find blocks to then duplicate
+    std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> B_Tgt_s = findDuplicatableBs(F, FAM.getResult<RIV>(F));
+    std::unordered_map<llvm::Value*, llvm::Value*> ValRe_mapper;
+    for (std::pair<llvm::BasicBlock*, llvm::Value*>& B_Tgt : B_Tgt_s)
+        duplicateB(B_Tgt.first, B_Tgt.second, ValRe_mapper);
+    return (B_Tgt_s.empty() ? llvm::PreservedAnalyses::all() : llvm::PreservedAnalyses::none());
+}
+
+
 std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> DuplicateB::findDuplicatableBs(llvm::Function& F, const RIV::Result& RIVResult) {
     std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> BlocksToDuplicate;
     // loop through each block in that function
@@ -37,6 +51,7 @@ void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::un
     llvm::BasicBlock* ifBranch = ifTerm->getParent();
     llvm::BasicBlock* elseBranch = elseTerm->getParent();
     llvm::BasicBlock* tailBranch = elseTerm->getSuccessor(0);
+    (&*headBranch->begin())->setName("cond");
     headBranch->setName(BName);// getSinglePredecessor will return nullptr if there is more than one
     ifBranch->setName(BName + ".if");
     elseBranch->setName(BName + ".else");
@@ -75,9 +90,13 @@ void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::un
             continue;
         }
         // set clone's names
-        llvm::StringRef instrName = Instr->getName();
-        ifClone->setName(instrName);
-        elseClone->setName(instrName + ".else");
+        std::string instName = Instr->getName().str();
+        if (instName.size() == 0) {
+            ToRemove.push_back(Instr);
+            continue;
+        }
+        ifClone->setName(instName);
+        elseClone->setName(instName + ".else");
         // eplace original statement in tail with phi of two cloned values
         llvm::PHINode* Phi = llvm::PHINode::Create(Instr->getType(), 2);
         Phi->addIncoming(ifClone, ifBranch);
@@ -89,17 +108,8 @@ void DuplicateB::duplicateB(llvm::BasicBlock* B, llvm::Value* TargetVal, std::un
     for (llvm::Instruction* I : ToRemove)
         I->eraseFromParent();
 }
-llvm::PreservedAnalyses DuplicateB::run(llvm::Function& F, llvm::FunctionAnalysisManager& FAM) {
-    // create a randmon number generator
-    if (!RngGen)
-        RngGen = F.getParent()->createRNG("duplicate-b");
-    // call the findDuplicatableBs function to find blocks to then duplicate
-    std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> B_Tgt_s = findDuplicatableBs(F, FAM.getResult<RIV>(F));
-    std::unordered_map<llvm::Value*, llvm::Value*> ValRe_mapper;
-    for (std::pair<llvm::BasicBlock*, llvm::Value*>& B_Tgt : B_Tgt_s)
-        duplicateB(B_Tgt.first, B_Tgt.second, ValRe_mapper);
-    return (B_Tgt_s.empty() ? llvm::PreservedAnalyses::all() : llvm::PreservedAnalyses::none());
-}
+
+
 llvm::PassPluginLibraryInfo getDuplicateBPluginInfo() {
     return {
         LLVM_PLUGIN_API_VERSION, "DuplicateB", LLVM_VERSION_STRING,
