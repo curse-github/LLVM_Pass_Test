@@ -28,7 +28,7 @@ struct MergeB : public llvm::PassInfoMixin<MergeB> {
 
     unsigned int mergeSinglePredecessorUnconditionalBranches(llvm::Function& F);
 
-    unsigned int MergeB::removeNoUseInstructions(llvm::Function& F);
+    unsigned int removeZeroUseInstructions(llvm::Function& F);
 };
 
 unsigned int countNonDbgInstrInB(llvm::BasicBlock* B);

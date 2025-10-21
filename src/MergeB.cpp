@@ -16,7 +16,6 @@ llvm::PreservedAnalyses MergeB::run(llvm::Function& Func, llvm::FunctionAnalysis
     if (Func.getName() != "main") return llvm::PreservedAnalyses::all();
     unsigned int TotalChanged = 0;
     unsigned int JustChanged1 = 0;
-    unsigned int JustChanged2 = 0;
     do {
         JustChanged1 = 0;
         for (llvm::BasicBlock& B : Func)
@@ -24,11 +23,9 @@ llvm::PreservedAnalyses MergeB::run(llvm::Function& Func, llvm::FunctionAnalysis
         JustChanged1 += removeDeadBlocks(Func);
         for (llvm::BasicBlock& B : Func)
             JustChanged1 += makeConditionalBranchesUnconditional(B);
-        do {
-            JustChanged2 = mergeSinglePredecessorUnconditionalBranches(Func);
-            JustChanged2 += removeDeadBlocks(Func);
-            JustChanged1 += JustChanged2;
-        } while (JustChanged2 > 0);
+        JustChanged1 = mergeSinglePredecessorUnconditionalBranches(Func);
+        JustChanged1 += removeDeadBlocks(Func);
+        JustChanged1 += removeZeroUseInstructions(Func);
         TotalChanged += JustChanged1;
     } while (JustChanged1 > 0);
     return ((TotalChanged > 0) ? llvm::PreservedAnalyses::none() : llvm::PreservedAnalyses::all());
@@ -76,7 +73,6 @@ unsigned int MergeB::attemptMerge(llvm::BasicBlock* B1) {
         for (std::pair<llvm::PHINode*, llvm::Value*> PnVP : phiToInst) {
             while (PnVP.first->getNumUses() != 0)
                 PnVP.first->use_begin()->set(PnVP.second);
-            // PnVP.first->removeFromParent();
         }
         // update anywhere branching to B2 and replace it with B1
         updatePredecessorTerminator(B2, B1);
@@ -176,7 +172,7 @@ bool hasPredecessors(llvm::BasicBlock* B) {
 
 
 unsigned int MergeB::makeConditionalBranchesUnconditional(llvm::BasicBlock& B) {
-    unsigned int Changed = false;
+    unsigned int Changed = 0;
     llvm::BasicBlock::iterator bE = B.end();
     for (llvm::BasicBlock::iterator bI = B.begin(); bI != bE; ++bI) {
         llvm::BranchInst* br = llvm::dyn_cast<llvm::BranchInst>(&*bI);
@@ -195,15 +191,12 @@ unsigned int MergeB::makeConditionalBranchesUnconditional(llvm::BasicBlock& B) {
 }
 
 
-unsigned int MergeB::mergeSinglePredecessorUnconditionalBranches(llvm::Function& F) {
+unsigned int MergeB::mergeSinglePredecessorUnconditionalBranches(llvm::Function& Func) {
     unsigned int LocalChanged = false;
-    llvm::Function::iterator bE = F.end();
-    bool doIncrement = true;
-    for (llvm::Function::iterator bI = F.begin(); bI != bE; doIncrement?(++bI):bI) {
-        //if (LocalChanged>3) break;
-        doIncrement = true;
+    llvm::Function::iterator bE = Func.end();
+    for (llvm::Function::iterator bI = Func.begin(); bI != bE; ++bI) {
         llvm::BasicBlock* B = &*bI;
-        if (!hasPredecessors(B) && (B != &F.getEntryBlock())) continue;
+        if (!hasPredecessors(B) && (B != &Func.getEntryBlock())) continue;
         llvm::BasicBlock* label = B->getSingleSuccessor();
         if (label == nullptr) continue;
         // predecessor must be the current block or one we already deleted
@@ -229,15 +222,28 @@ unsigned int MergeB::mergeSinglePredecessorUnconditionalBranches(llvm::Function&
                 PN->addIncoming(PN->getIncomingValueForBlock(label), B);
             }
         }
-        doIncrement = false;
+        --bI;
         LocalChanged++;
     }
     return LocalChanged;
 }
 
 
-unsigned int MergeB::removeNoUseInstructions(llvm::Function& F) {
-    return 0;
+unsigned int MergeB::removeZeroUseInstructions(llvm::Function& Func) {
+    std::vector<llvm::Instruction*> toDelete{};
+    llvm::Function::iterator bE = Func.end();
+    for (llvm::Function::iterator bI = Func.begin(); bI != bE; ++bI) {
+        llvm::BasicBlock* B = &*bI;
+        llvm::BasicBlock::iterator iE = B->end();
+        for (llvm::BasicBlock::iterator iI = B->begin(); iI != iE; ++iI) {
+            llvm::Instruction* Inst = &*iI;
+            if ((Inst->getNumUses() == 0) && !Inst->isTerminator() && !llvm::isa<llvm::CallInst>(Inst))
+                toDelete.push_back(Inst);
+        }
+    }
+    for (llvm::Instruction* Inst : toDelete)
+        Inst->eraseFromParent();
+    return static_cast<unsigned int>(toDelete.size());
 }
 
 
