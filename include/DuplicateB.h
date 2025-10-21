@@ -6,7 +6,6 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/ValueMap.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/RandomNumberGenerator.h"
 
@@ -16,9 +15,9 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
-#include <map>
 #include <memory>
 #include <random>
+#include <vector>
 
 struct DuplicateB : public llvm::PassInfoMixin<DuplicateB> {
     std::unique_ptr<llvm::RandomNumberGenerator> RngGen;

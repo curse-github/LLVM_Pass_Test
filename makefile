@@ -4,8 +4,7 @@ libs = $(shell llvm-config-21 --link-static --ldflags --libs core passes)
 test: mkdir build lib
 	@cp ./strLen.ll ./tmp/input_for_passes.ll
 	@-echo running DuplicateB.so plugin on input_for_passes.ll
-	@opt -load-pass-plugin=./llvm-tutor-testing/build/lib/libRIV.so -load-pass-plugin=./out/libDuplicateB.so -p=duplicate-b ./tmp/input_for_passes.ll -S -o ./tmp/output_from_duplicate.ll
-	@opt -load-pass-plugin=./llvm-tutor-testing/build/lib/libRIV.so -load-pass-plugin=./out/libDuplicateB.so -p=duplicate-b ./tmp/output_from_duplicate.ll -S -o ./tmp/output_from_duplicate.ll
+	@opt -load-pass-plugin=./llvm-tutor-testing/build/lib/libRIV.so -load-pass-plugin=./out/libDuplicateB.so -p=duplicate-b,duplicate-b,duplicate-b ./tmp/input_for_passes.ll -S -o ./tmp/output_from_duplicate.ll
 	@-echo running MergeB.so plugin on output_from_duplicate.ll
 	@opt -load-pass-plugin=./out/libMergeB.so -p=merge-b ./tmp/output_from_duplicate.ll -S -o ./tmp/output_from_merge.ll
 

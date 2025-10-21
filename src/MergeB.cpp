@@ -2,7 +2,30 @@
 
 #include <iostream>
 
-unsigned int removeDeadBlocks(llvm::Function& Func) {
+std::string toString(llvm::Instruction* Inst) {
+    std::string str;
+    llvm::raw_string_ostream rso(str);
+    Inst->print(rso);
+    return str;
+}
+
+llvm::PreservedAnalyses MergeB::run(llvm::Function& Func, llvm::FunctionAnalysisManager& ) {
+    unsigned int TotalChanged = 0;
+    unsigned int JustChanged = 0;
+    do {
+        JustChanged = attemptMerge(Func);
+        JustChanged += deleteUselessBlock(Func);
+        JustChanged += makeConditionalBranchesUnconditional(Func);
+        JustChanged += mergeSinglePredecessorUnconditionalBranches(Func);
+        JustChanged += deleteUselessBlock(Func);
+        JustChanged += removeZeroUseInstructions(Func);
+        TotalChanged += JustChanged;
+    } while (JustChanged > 0);
+    return ((TotalChanged > 0) ? llvm::PreservedAnalyses::none() : llvm::PreservedAnalyses::all());
+}
+
+
+unsigned int MergeB::deleteUselessBlock(llvm::Function& Func) {
     // find dead blocks and delete them
     std::vector<llvm::BasicBlock*> toDelete{};
     llvm::BasicBlock* eB = &Func.getEntryBlock();
@@ -12,115 +35,109 @@ unsigned int removeDeadBlocks(llvm::Function& Func) {
     llvm::DeleteDeadBlocks(toDelete);
     return static_cast<unsigned int>(toDelete.size());
 }
-llvm::PreservedAnalyses MergeB::run(llvm::Function& Func, llvm::FunctionAnalysisManager& ) {
-    if (Func.getName() != "main") return llvm::PreservedAnalyses::all();
-    unsigned int TotalChanged = 0;
-    unsigned int JustChanged1 = 0;
-    do {
-        JustChanged1 = 0;
-        for (llvm::BasicBlock& B : Func)
-            JustChanged1 += attemptMerge(&B);
-        JustChanged1 += removeDeadBlocks(Func);
-        for (llvm::BasicBlock& B : Func)
-            JustChanged1 += makeConditionalBranchesUnconditional(B);
-        JustChanged1 = mergeSinglePredecessorUnconditionalBranches(Func);
-        JustChanged1 += removeDeadBlocks(Func);
-        JustChanged1 += removeZeroUseInstructions(Func);
-        TotalChanged += JustChanged1;
-    } while (JustChanged1 > 0);
-    return ((TotalChanged > 0) ? llvm::PreservedAnalyses::none() : llvm::PreservedAnalyses::all());
+bool MergeB::hasPredecessors(llvm::BasicBlock* B) {
+    llvm::pred_range tmp = llvm::predecessors(B);
+    return tmp.begin() != tmp.end();
 }
 
-std::string toString(llvm::Instruction* Inst) {
-    std::string str;
-    llvm::raw_string_ostream rso(str);
-    Inst->print(rso);
-    return str;
-}
-unsigned int MergeB::attemptMerge(llvm::BasicBlock* B1) {
-    // cannot be unconditional branch
-    llvm::BranchInst* B1Term = llvm::dyn_cast<llvm::BranchInst>(B1->getTerminator());
-    if ((B1Term == nullptr) || !B1Term->isUnconditional()) return 0;
-    // predecessor must be either branch or switch
-    for (llvm::BasicBlock* B : llvm::predecessors(B1))
-        if (!(llvm::isa<llvm::BranchInst>(B->getTerminator()) || llvm::isa<llvm::SwitchInst>(B->getTerminator())))
-            return 0;
-    // must have only one predecessor and successor
-    llvm::BasicBlock* B1Pred = B1->getSinglePredecessor();
-    if (B1Pred == nullptr) return 0;
-    llvm::BasicBlock* B1Succ = B1->getSingleSuccessor();
-    if (B1Succ == nullptr) return 0;
-    // defined up here so it can be reused
-    unsigned int B1NumInst = countNonDbgInstrInB(B1);
-    // get first instruction of sucessor block
-    llvm::BasicBlock* BSucc = B1Term->getSuccessor(0);
-    for (llvm::BasicBlock* B2 : predecessors(BSucc)) {
-        // terminator must be unconditional
-        llvm::BranchInst* B2Term = llvm::dyn_cast<llvm::BranchInst>(B2->getTerminator());
-        if ((B2Term == nullptr) || !B2Term->isUnconditional()) continue;
-        // cannot be equal to B1
-        if (B1 == B2) continue;
-        // must have same sucessor and predecessor
-        llvm::BasicBlock* B2Pred = B2->getSinglePredecessor();
-        if (B2Pred != B1Pred) continue;
-        llvm::BasicBlock* B2Succ = B2->getSingleSuccessor();
-        if (B2Succ != B1Succ) continue;
-        // must have the same number of instructions as B1 (just a quick check before actually checking all instructions)
-        if (B1NumInst != countNonDbgInstrInB(B2)) continue;
-        // check if all instructions are mergable with one another in both blocks (see canMergeBlocks)
-        std::unordered_map<llvm::PHINode*, llvm::Value*> phiToInst{};
-        if (!canMergeBlocks(B1, B2, phiToInst)) continue;
-        for (std::pair<llvm::PHINode*, llvm::Value*> PnVP : phiToInst) {
-            while (PnVP.first->getNumUses() != 0)
-                PnVP.first->use_begin()->set(PnVP.second);
+
+unsigned int MergeB::attemptMerge(llvm::Function& Func) {
+    unsigned int LocalChanged = false;
+    llvm::Function::iterator bE = Func.end();
+    for (llvm::Function::iterator bI = Func.begin(); bI != bE; ++bI) {
+        llvm::BasicBlock* B1 = &*bI;
+        if (!isMergeCandidate(B1)) continue;
+        // search through the other predecessors of this blocks successor to find B2
+        for (llvm::BasicBlock* B2 : llvm::predecessors(B1->getSingleSuccessor())) {
+            // check if all the two blocks can be merged
+            std::unordered_map<llvm::PHINode*, llvm::Value*> phiToInst{};
+            if (!canMergeBlocks(B1, B2, phiToInst)) continue;
+            // replace all uses of the phi instructions with the 
+            for (std::pair<llvm::PHINode*, llvm::Value*> PnVP : phiToInst) {
+                std::string str = PnVP.first->getName().str();
+                PnVP.first->setName(str + ".old");
+                PnVP.second->setName(str);
+                while (PnVP.first->getNumUses() != 0)
+                    PnVP.first->use_begin()->set(PnVP.second);
+            }
+            // update anywhere branching to B2 and replace it with B1
+            updateBranchesToBlock(B2, B1);
+            LocalChanged++;
         }
-        // update anywhere branching to B2 and replace it with B1
-        updatePredecessorTerminator(B2, B1);
-        return 1;
     }
-    return 0;
+    return LocalChanged;
+}
+bool MergeB::isMergeCandidate(llvm::BasicBlock* B) {
+    // cannot be unconditional branch
+    llvm::BranchInst* BTerm = llvm::dyn_cast<llvm::BranchInst>(B->getTerminator());
+    if ((BTerm == nullptr) || !BTerm->isUnconditional()) return false;
+    // predecessor must be either branch or switch
+    for (llvm::BasicBlock* Pred : llvm::predecessors(B))
+        if (!llvm::isa<llvm::BranchInst>(Pred->getTerminator()))
+            return false;
+    // must have only one predecessor
+    llvm::BasicBlock* B1Pred = B->getSinglePredecessor();
+    if (B1Pred == nullptr) return false;
+    // and only one successor
+    llvm::BasicBlock* B1Succ = B->getSingleSuccessor();
+    if (B1Succ == nullptr) return false;
+    return true;
 }
 bool MergeB::canMergeBlocks(llvm::BasicBlock* B1, llvm::BasicBlock* B2, std::unordered_map<llvm::PHINode*, llvm::Value*>& phiToInst) {
-    llvm::Instruction* InstB1 = &*B1->begin();
+    // terminator must be unconditional
+    llvm::BranchInst* B2Term = llvm::dyn_cast<llvm::BranchInst>(B2->getTerminator());
+    if ((B2Term == nullptr) || !B2Term->isUnconditional()) return false;
+    // cannot be equal to B1
+    if (B1 == B2) return false;
+    // must have same sucessor and predecessor
+    if (B1->getSinglePredecessor() != B2->getSinglePredecessor()) return false;
+    if (B2->getSinglePredecessor() != B2->getSinglePredecessor()) return false;
+    // must have the same number of instructions as B1 (just a quick check before actually checking all instructions)
+    if (countNonDbgInstrInB(B1) != countNonDbgInstrInB(B2)) return false;
+    // get first non debug instructions
     llvm::Instruction* B1Term = B1->getTerminator();
-    while ((InstB1 != B1Term) && llvm::isa<llvm::DbgInfoIntrinsic>(InstB1))
-        InstB1 = InstB1->getNextNode();
+    llvm::Instruction* InstB1 = &*B1->begin();
+    if (llvm::isa<llvm::DbgInfoIntrinsic>(InstB1))
+        InstB1 = InstB1->getNextNonDebugInstruction();
     if (InstB1 == B1Term) return true;
+
     llvm::Instruction* InstB2 = &*B2->begin();
-    llvm::Instruction* B2Term = B2->getTerminator();
-    while ((InstB2 != B2Term) && llvm::isa<llvm::DbgInfoIntrinsic>(InstB2))
-        InstB2 = InstB2->getNextNode();
+    if (llvm::isa<llvm::DbgInfoIntrinsic>(InstB2))
+        InstB2 = InstB2->getNextNonDebugInstruction();
     if (InstB2 == B2Term) return true;
-    // get previous not untill it reaches the beginning nad check for if you are able to merge each instruction
+    // go through each instructions and check if they can be merged
     std::unordered_map<llvm::Value*, llvm::PHINode*> instToPhi{};
     while (canMergeInstructions(InstB1, B1, InstB2, B2, instToPhi, phiToInst)) {
-        do
-            InstB1 = InstB1->getNextNode();
-        while ((InstB1 != B1Term) && llvm::isa<llvm::DbgInfoIntrinsic>(InstB1));
+        InstB1 = InstB1->getNextNonDebugInstruction();
         if (InstB1 == B1Term) return true;
-        do
-            InstB2 = InstB2->getNextNode();
-        while ((InstB2 == B2Term) && llvm::isa<llvm::DbgInfoIntrinsic>(InstB2));
+        InstB2 = InstB2->getNextNonDebugInstruction();
         if (InstB2 == B2Term) return true;
     }
     return false;// if it reaches here there was an instruction that could not be merged
 }
+unsigned int MergeB::countNonDbgInstrInB(llvm::BasicBlock* B) {
+    unsigned int Count = 0;
+    for (llvm::Instruction& Instr : *B)
+        if (!llvm::isa<llvm::DbgInfoIntrinsic>(Instr))
+            Count++;
+    return Count;
+}
 bool MergeB::canMergeInstructions(llvm::Instruction* Inst1, llvm::BasicBlock* B1, llvm::Instruction* Inst2, llvm::BasicBlock* B2, std::unordered_map<llvm::Value*, llvm::PHINode*>& instToPhi, std::unordered_map<llvm::PHINode*, llvm::Value*>& phiToInst) {
-// instructions must be the same instruction type
+    // instructions must be the same instruction type
     if (!Inst1->isSameOperationAs(Inst2))
         return false;
+    // and cant be phi instruction.
     if (llvm::isa<llvm::PHINode>(Inst1))
         return false;
-    // must all have one use or all none
-    unsigned int numUses = Inst1->getNumUses();
     // should be used the same number of times
+    unsigned int numUses = Inst1->getNumUses();
     if (numUses != Inst2->getNumUses())
         return false;
     // must have same number of operands
     unsigned int NumOpnds = Inst1->getNumOperands();
     if (NumOpnds != Inst2->getNumOperands())
         return false;
-    // operands must be equal
+    // operands must be equal (or will be equal after fixing the phi instructions)
     for (unsigned int OpndIdx = 0; OpndIdx != NumOpnds; ++OpndIdx)
         if (
             (Inst1->getOperand(OpndIdx) != Inst2->getOperand(OpndIdx)) &&
@@ -129,14 +146,11 @@ bool MergeB::canMergeInstructions(llvm::Instruction* Inst1, llvm::BasicBlock* B1
             return false;
     // add to phi map
     if (Inst1->getType()->isVoidTy()) return true;
-    llvm::PHINode* PN = nullptr;
-    llvm::Value::user_iterator uE = Inst1->user_end();
-    llvm::BasicBlock* BSucc = B1->getTerminator()->getSuccessor(0);
-    for (llvm::Value::user_iterator uI = Inst1->user_begin(); uI != uE; ++uI) {
-        PN = llvm::dyn_cast<llvm::PHINode>(*uI);
-        if (PN == nullptr) continue;
-        // must be within the shared successor of B1 and B2
-        if (PN->getParent() != BSucc) { PN = nullptr; continue; }
+    llvm::BasicBlock* B1Succ = B1->getSingleSuccessor();
+    llvm::BasicBlock::iterator bE = B1Succ->end();
+    for (llvm::BasicBlock::iterator bI = B1Succ->begin(); bI != bE; ++bI) {
+        llvm::PHINode* PN = llvm::dyn_cast<llvm::PHINode>(&*bI);
+        if (PN == nullptr) break;
         // must contain predicated for B1 and B2 which are the values Inst1 and Inst2 respectively
         if (PN->getIncomingValueForBlock(B1) != Inst1) { PN = nullptr; continue; }
         if (PN->getIncomingValueForBlock(B2) != Inst2) { PN = nullptr; continue; }
@@ -147,14 +161,7 @@ bool MergeB::canMergeInstructions(llvm::Instruction* Inst1, llvm::BasicBlock* B1
     }
     return true;
 }
-unsigned int countNonDbgInstrInB(llvm::BasicBlock* B) {
-    unsigned int Count = 0;
-    for (llvm::Instruction& Instr : *B)
-        if (!llvm::isa<llvm::DbgInfoIntrinsic>(Instr))
-            Count++;
-    return Count;
-}
-void MergeB::updatePredecessorTerminator(llvm::BasicBlock* BToErase, llvm::BasicBlock* BToRetain) {
+void MergeB::updateBranchesToBlock(llvm::BasicBlock* BToErase, llvm::BasicBlock* BToRetain) {
     // get anywhere where BToErase is an operand and replace it with BToRetain
     llvm::SmallVector<llvm::BasicBlock*, 8> BToUpdate(predecessors(BToErase));
     for (llvm::BasicBlock* B : BToUpdate) {
@@ -165,29 +172,30 @@ void MergeB::updatePredecessorTerminator(llvm::BasicBlock* BToErase, llvm::Basic
                 Term->setOperand(OpIdx, BToRetain);
     }
 }
-bool hasPredecessors(llvm::BasicBlock* B) {
-    llvm::pred_range tmp = llvm::predecessors(B);
-    return tmp.begin() != tmp.end();
-}
 
 
-unsigned int MergeB::makeConditionalBranchesUnconditional(llvm::BasicBlock& B) {
-    unsigned int Changed = 0;
-    llvm::BasicBlock::iterator bE = B.end();
-    for (llvm::BasicBlock::iterator bI = B.begin(); bI != bE; ++bI) {
-        llvm::BranchInst* br = llvm::dyn_cast<llvm::BranchInst>(&*bI);
+unsigned int MergeB::makeConditionalBranchesUnconditional(llvm::Function& Func) {
+    unsigned int LocalChanged = false;
+    // loop through function
+    llvm::Function::iterator bE = Func.end();
+    for (llvm::Function::iterator bI = Func.begin(); bI != bE; ++bI) {
+        llvm::BasicBlock* B = &*bI;
+        // if is conditional branch
+        llvm::BranchInst* br = llvm::dyn_cast<llvm::BranchInst>(B->getTerminator());
         if (br == nullptr) continue;
         if (br->isUnconditional()) continue;
+        // but both condition blocks are equal
         llvm::Value* two = br->getOperand(1);
         llvm::Value* three = br->getOperand(2);
         if (two != three) continue;
+        // create a new unconditional branch instruction to that block
         llvm::BasicBlock* label = llvm::dyn_cast<llvm::BasicBlock>(two);
-        if (label == nullptr) continue;
         llvm::BranchInst* newBr = llvm::BranchInst::Create(label);
-        llvm::ReplaceInstWithInst(&B, bI, newBr);
-        Changed++;
+        // replace the original instruction
+        llvm::ReplaceInstWithInst(B, --B->end(), newBr);
+        LocalChanged++;
     }
-    return Changed;
+    return LocalChanged;
 }
 
 
@@ -196,10 +204,10 @@ unsigned int MergeB::mergeSinglePredecessorUnconditionalBranches(llvm::Function&
     llvm::Function::iterator bE = Func.end();
     for (llvm::Function::iterator bI = Func.begin(); bI != bE; ++bI) {
         llvm::BasicBlock* B = &*bI;
-        if (!hasPredecessors(B) && (B != &Func.getEntryBlock())) continue;
+        // must have since successor
         llvm::BasicBlock* label = B->getSingleSuccessor();
         if (label == nullptr) continue;
-        // predecessor must be the current block or one we already deleted
+        // predecessor must be the current block
         if (label->getSinglePredecessor() != B) continue;
         // remove original terminator, will be replaced with one from the successor block
         B->getTerminator()->eraseFromParent();
@@ -207,13 +215,18 @@ unsigned int MergeB::mergeSinglePredecessorUnconditionalBranches(llvm::Function&
         llvm::BasicBlock::iterator lE = label->end();
         for(llvm::BasicBlock::iterator lI = label->begin(); lI != lE; ++lI) {
             llvm::Instruction* Inst = &*lI;
-            // clone instruction, re-map it, and put it into the predecessor block
+            // clone instruction, and put it into the predecessor block
             llvm::Instruction* InstClone = Inst->clone();
             InstClone->insertBefore(B->end());
-            // update uses of that value
+            // fix names
+            std::string name = Inst->getName().str();
+            Inst->setName(name+".old");
+            InstClone->setName(name);
+            // update uses of that original value to the new value
             while (Inst->getNumUses() != 0)
                 Inst->use_begin()->set(InstClone);
         }
+        // update any phi nodes to use new merged block as incoming block instead of old block
         for(llvm::BasicBlock* Succ : llvm::successors(label)) {
             llvm::BasicBlock::iterator E = Succ->end();
             for(llvm::BasicBlock::iterator I = Succ->begin(); I != E; ++I) {
@@ -222,7 +235,6 @@ unsigned int MergeB::mergeSinglePredecessorUnconditionalBranches(llvm::Function&
                 PN->addIncoming(PN->getIncomingValueForBlock(label), B);
             }
         }
-        --bI;
         LocalChanged++;
     }
     return LocalChanged;
@@ -231,16 +243,20 @@ unsigned int MergeB::mergeSinglePredecessorUnconditionalBranches(llvm::Function&
 
 unsigned int MergeB::removeZeroUseInstructions(llvm::Function& Func) {
     std::vector<llvm::Instruction*> toDelete{};
+    // loop through function
     llvm::Function::iterator bE = Func.end();
     for (llvm::Function::iterator bI = Func.begin(); bI != bE; ++bI) {
         llvm::BasicBlock* B = &*bI;
+        // loop through block
         llvm::BasicBlock::iterator iE = B->end();
         for (llvm::BasicBlock::iterator iI = B->begin(); iI != iE; ++iI) {
             llvm::Instruction* Inst = &*iI;
-            if ((Inst->getNumUses() == 0) && !Inst->isTerminator() && !llvm::isa<llvm::CallInst>(Inst))
+            // if instruction has no use mark it to be deleted
+            if ((Inst->getNumUses() == 0) && !Inst->isTerminator() && !llvm::isa<llvm::CallInst>(Inst) && !llvm::isa<llvm::StoreInst>(Inst))
                 toDelete.push_back(Inst);
         }
     }
+    // actually delete the un-used instructions.
     for (llvm::Instruction* Inst : toDelete)
         Inst->eraseFromParent();
     return static_cast<unsigned int>(toDelete.size());
@@ -266,7 +282,6 @@ llvm::PassPluginLibraryInfo getMergeBPluginInfo() {
         }
     };
 }
-
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
     return getMergeBPluginInfo();
