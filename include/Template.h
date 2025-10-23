@@ -6,6 +6,8 @@
     #else
         #define TEMP_API __declspec(dllimport)
     #endif
+#else
+    #define TEMP_API
 #endif
 
 #include "RIV.h"

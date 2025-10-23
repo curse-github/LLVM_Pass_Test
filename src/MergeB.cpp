@@ -289,7 +289,9 @@ llvm::PassPluginLibraryInfo getMergeBPluginInfo() {
         }
     };
 }
-#pragma comment(linker, "/EXPORT:llvmGetPassPluginInfo")
+#ifdef _WIN32
+    #pragma comment(linker, "/EXPORT:llvmGetPassPluginInfo")
+#endif
 extern "C"
 llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
     return getMergeBPluginInfo();

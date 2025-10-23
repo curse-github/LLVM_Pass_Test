@@ -6,6 +6,8 @@
     #else
         #define DUP_B_API __declspec(dllimport)
     #endif
+#else
+    #define DUP_B_API
 #endif
 
 #include "RIV.h"

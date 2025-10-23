@@ -3,7 +3,7 @@ ifeq ($(OS),Windows_NT)
 	staticExt = lib
 	dynamicExt = dll
 	executableExt = exe
-	dynamicArgs = -MD -lntdll -D_WIN32 -fexceptions -frtti
+	dynamicArgs = -MD -lntdll -D_WIN32 -fexceptions -frtti ./out/libRIV.lib
 else
 	objectExt = o
 	staticExt = a
@@ -15,14 +15,14 @@ endif
 includedir = $(shell llvm-config --includedir)
 libs = $(shell llvm-config --ldflags --libs core support passes)
 test: mkdir build lib
+	@-echo creating input_for_passes.ll
 ifeq ($(OS),Windows_NT)
 	@type .\strLen.ll >> .\tmp\input_for_passes.ll
 else
 	@cp ./strLen.ll ./tmp/input_for_passes.ll
 endif
-	@type .\strLen.ll >> .\tmp\output_from_duplicate.ll
 	@-echo running DuplicateB.$(dynamicExt) plugin on input_for_passes.ll
-	@opt -load-pass-plugin ./out/libRIV.$(dynamicExt) -load-pass-plugin ./out/libDuplicateB.$(dynamicExt) -passes duplicate-b ./tmp/input_for_passes.ll -S -o ./tmp/output_from_duplicate.ll
+	@opt -load-pass-plugin ./out/libRIV.$(dynamicExt) -load-pass-plugin ./out/libDuplicateB.$(dynamicExt) -passes duplicate-b,duplicate-b,duplicate-b ./tmp/input_for_passes.ll -S -o ./tmp/output_from_duplicate.ll
 	@-echo running MergeB.$(dynamicExt) plugin on output_from_duplicate.ll
 	@opt -load-pass-plugin ./out/libRIV.$(dynamicExt) -load-pass-plugin ./out/libDuplicateB.$(dynamicExt) -load-pass-plugin ./out/libMergeB.$(dynamicExt) -passes merge-b ./tmp/output_from_duplicate.ll -S -o ./tmp/output_from_merge.ll
 
@@ -62,7 +62,7 @@ build: mkdir ./src/MergeB.cpp
 	@clang++ $(dynamicArgs) -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -fdeclspec -std=c++23 -O3 -I$(includedir) -I./include ./src/RIV.cpp $(libs) -shared -o ./out/libRIV.$(dynamicExt)
 	@-echo finished building libRIV.$(dynamicExt)
 	@-echo building libDuplicateB.$(dynamicExt)
-	@clang++ $(dynamicArgs) -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -fdeclspec -std=c++23 -O3 -I$(includedir) -I./include ./src/DuplicateB.cpp ./out/libRIV.lib $(libs) -shared -o ./out/libDuplicateB.$(dynamicExt)
+	@clang++ $(dynamicArgs) -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -fdeclspec -std=c++23 -O3 -I$(includedir) -I./include ./src/DuplicateB.cpp $(libs) -shared -o ./out/libDuplicateB.$(dynamicExt)
 	@-echo finished building libDuplicateB.$(dynamicExt)
 	@-echo building libMergeB.$(dynamicExt)
 	@clang++ $(dynamicArgs) -Werror -Wall -Wno-unused-command-line-argument -Wno-deprecated-declarations -fdeclspec -std=c++23 -O3 -I$(includedir) -I./include ./src/MergeB.cpp $(libs) -shared -o ./out/libMergeB.$(dynamicExt)

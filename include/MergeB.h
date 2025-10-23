@@ -7,6 +7,8 @@
     #else
         #define MER_B_API __declspec(dllimport)
     #endif
+#else
+    #define MER_B_API
 #endif
 
 #include "llvm/IR/BasicBlock.h"
