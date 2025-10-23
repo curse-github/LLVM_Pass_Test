@@ -1,5 +1,12 @@
 #ifndef __DUPLICATE_B
 #define __DUPLICATE_B
+#ifdef _WIN32
+    #ifdef _BUILD_DUP_B
+        #define DUP_B_API __declspec(dllexport)
+    #else
+        #define DUP_B_API __declspec(dllimport)
+    #endif
+#endif
 
 #include "RIV.h"
 #include "llvm/IR/BasicBlock.h"
@@ -19,7 +26,7 @@
 #include <random>
 #include <vector>
 
-struct DuplicateB : public llvm::PassInfoMixin<DuplicateB> {
+struct DUP_B_API DuplicateB : public llvm::PassInfoMixin<DuplicateB> {
     std::unique_ptr<llvm::RandomNumberGenerator> RngGen;
     static bool isRequired() { return true; }
 

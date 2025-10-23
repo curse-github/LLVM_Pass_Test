@@ -1,8 +1,5 @@
+#define _BUILD_TEMP
 #include "Template.h"
-
-
-#define DEBUG_TYPE "template"
-STATISTIC(DuplicateBBCountStats, "The # of duplicated blocks");
 
 llvm::PreservedAnalyses Template::run(llvm::Function& F, llvm::FunctionAnalysisManager& FAM) {
     // this is the first function to be run, it gets run for each function in the file and determines the behaviour of the plugin
@@ -28,7 +25,8 @@ llvm::PassPluginLibraryInfo getTemplatePluginInfo() {
         }
     };
 }
-extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
-llvmGetPassPluginInfo() {
-    return getTemplatePluginInfo();
+#pragma comment(linker, "/EXPORT:llvmGetPassPluginInfo")
+extern "C"
+llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
+  return getTemplatePluginInfo();
 }

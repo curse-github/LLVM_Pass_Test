@@ -1,5 +1,12 @@
 #ifndef __DUPLICATE_B
 #define __DUPLICATE_B
+#ifdef _WIN32
+    #ifdef _BUILD_TEMP
+        #define TEMP_API __declspec(dllexport)
+    #else
+        #define TEMP_API __declspec(dllimport)
+    #endif
+#endif
 
 #include "RIV.h"
 #include "llvm/IR/BasicBlock.h"
@@ -22,8 +29,9 @@
 
 // inherits from llvm::PassInfoMixin for transfomation passes
 // use llvm::InfoAnalysisMixin for analysis passes
-struct Template : public llvm::PassInfoMixin<Template> {
+struct TEMP_API Template : public llvm::PassInfoMixin<Template> {
     static bool isRequired() { return true; }
+    llvm::PreservedAnalyses run(llvm::Function& F, llvm::FunctionAnalysisManager&);
 
     Template() = default;
     Template(const Template& copy) = delete;
@@ -31,8 +39,6 @@ struct Template : public llvm::PassInfoMixin<Template> {
     Template(Template&& move) = delete;
     Template& operator=(Template&& move) = delete;
     ~Template() = default;
-
-    llvm::PreservedAnalyses run(llvm::Function& F, llvm::FunctionAnalysisManager&);
 };
 
 #endif// __DUPLICATE_B

@@ -1,3 +1,4 @@
+#define _BUILD_DUP_B
 #include "DuplicateB.h"
 
 #include <iostream>
@@ -7,7 +8,8 @@ llvm::PreservedAnalyses DuplicateB::run(llvm::Function& F, llvm::FunctionAnalysi
     if (!RngGen)
         RngGen = F.getParent()->createRNG("duplicate-b");
     // call the findDuplicatableBs function to find blocks to then duplicate
-    std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> B_Tgt_s = findDuplicatableBs(F, FAM.getResult<RIV>(F));
+    const RIV::Result& RIVResult = FAM.getResult<RIV>(F);
+    std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> B_Tgt_s = findDuplicatableBs(F, RIVResult);
     std::unordered_map<llvm::Value*, llvm::Value*> ValRe_mapper;
     for (std::pair<llvm::BasicBlock*, llvm::Value*>& B_Tgt : B_Tgt_s)
         duplicateB(B_Tgt.first, B_Tgt.second, ValRe_mapper);
@@ -23,13 +25,13 @@ std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> DuplicateB::findDuplicat
         if (B.isLandingPad())
             continue;
         // fetch the reachable integer values (RIV)
-        const llvm::SmallPtrSet<llvm::Value *, 8U>& ReachableValues = RIVResult.lookup(&B);
+        const llvm::SmallPtrSet<llvm::Value*, 8U>& ReachableValues = RIVResult.lookup(&B);
         // if there isnt any, skip that block
         size_t ReachableValuesCount = ReachableValues.size();
         if (0 == ReachableValuesCount)
             continue;
         // get a random one of the reachable values
-        llvm::SmallPtrSetIterator<llvm::Value *> Iter = ReachableValues.begin();
+        llvm::SmallPtrSetIterator<llvm::Value*> Iter = ReachableValues.begin();
         std::uniform_int_distribution<> Dist(0, ReachableValuesCount - 1);
         std::advance(Iter, Dist(*RngGen));
         if (llvm::dyn_cast<llvm::GlobalValue>(*Iter))
@@ -133,7 +135,8 @@ llvm::PassPluginLibraryInfo getDuplicateBPluginInfo() {
         }
     };
 }
-extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
-llvmGetPassPluginInfo() {
+#pragma comment(linker, "/EXPORT:llvmGetPassPluginInfo")
+extern "C"
+llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
     return getDuplicateBPluginInfo();
 }

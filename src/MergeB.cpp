@@ -1,3 +1,4 @@
+#define _BUILD_MER_B
 #include "MergeB.h"
 
 #include <iostream>
@@ -98,29 +99,35 @@ bool MergeB::canMergeBlocks(llvm::BasicBlock* B1, llvm::BasicBlock* B2, std::uno
     llvm::Instruction* B1Term = B1->getTerminator();
     llvm::Instruction* InstB1 = &*B1->begin();
     if (llvm::isa<llvm::DbgInfoIntrinsic>(InstB1))
-        InstB1 = InstB1->getNextNonDebugInstruction();
+        InstB1 = getNextNonDebugInstruction(InstB1, B1Term);
     if (InstB1 == B1Term) return true;
 
     llvm::Instruction* InstB2 = &*B2->begin();
     if (llvm::isa<llvm::DbgInfoIntrinsic>(InstB2))
-        InstB2 = InstB2->getNextNonDebugInstruction();
+        InstB2 = getNextNonDebugInstruction(InstB2, B2Term);
     if (InstB2 == B2Term) return true;
     // go through each instructions and check if they can be merged
     std::unordered_map<llvm::Value*, llvm::PHINode*> instToPhi{};
     while (canMergeInstructions(InstB1, B1, InstB2, B2, instToPhi, phiToInst)) {
-        InstB1 = InstB1->getNextNonDebugInstruction();
+        InstB1 = getNextNonDebugInstruction(InstB1, B1Term);
         if (InstB1 == B1Term) return true;
-        InstB2 = InstB2->getNextNonDebugInstruction();
+        InstB2 = getNextNonDebugInstruction(InstB2, B2Term);
         if (InstB2 == B2Term) return true;
     }
     return false;// if it reaches here there was an instruction that could not be merged
 }
 unsigned int MergeB::countNonDbgInstrInB(llvm::BasicBlock* B) {
     unsigned int Count = 0;
-    for (llvm::Instruction& Instr : *B)
-        if (!llvm::isa<llvm::DbgInfoIntrinsic>(Instr))
+    for (llvm::Instruction& Inst : *B)
+        if (!llvm::isa<llvm::DbgInfoIntrinsic>(Inst))
             Count++;
     return Count;
+}
+llvm::Instruction* MergeB::getNextNonDebugInstruction(llvm::Instruction* Inst, llvm::Instruction* Term) {
+    do {
+        Inst = Inst->getNextNode();
+    } while ((Inst != Term) && llvm::isa<llvm::DbgInfoIntrinsic>(Inst));
+    return Inst;
 }
 bool MergeB::canMergeInstructions(llvm::Instruction* Inst1, llvm::BasicBlock* B1, llvm::Instruction* Inst2, llvm::BasicBlock* B2, std::unordered_map<llvm::Value*, llvm::PHINode*>& instToPhi, std::unordered_map<llvm::PHINode*, llvm::Value*>& phiToInst) {
     // instructions must be the same instruction type
@@ -282,7 +289,8 @@ llvm::PassPluginLibraryInfo getMergeBPluginInfo() {
         }
     };
 }
-extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
-llvmGetPassPluginInfo() {
+#pragma comment(linker, "/EXPORT:llvmGetPassPluginInfo")
+extern "C"
+llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
     return getMergeBPluginInfo();
 }

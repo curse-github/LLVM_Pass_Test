@@ -1,6 +1,13 @@
 
 #ifndef __MERGE_B
 #define __MERGE_B
+#ifdef _WIN32
+    #ifdef _BUILD_MER_B
+        #define MER_B_API __declspec(dllexport)
+    #else
+        #define MER_B_API __declspec(dllimport)
+    #endif
+#endif
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Instruction.h"
@@ -14,7 +21,7 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
-struct MergeB : public llvm::PassInfoMixin<MergeB> {
+struct MER_B_API MergeB : public llvm::PassInfoMixin<MergeB> {
     static bool isRequired() { return true; }
     llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager&);
 
@@ -25,6 +32,7 @@ struct MergeB : public llvm::PassInfoMixin<MergeB> {
     bool isMergeCandidate(llvm::BasicBlock* B);
     bool canMergeBlocks(llvm::BasicBlock* B1, llvm::BasicBlock* B2, std::unordered_map<llvm::PHINode*, llvm::Value*>& phiToInst);
     unsigned int countNonDbgInstrInB(llvm::BasicBlock* B);
+    llvm::Instruction* getNextNonDebugInstruction(llvm::Instruction* Inst, llvm::Instruction* Term);
     bool canMergeInstructions(llvm::Instruction* Inst1, llvm::BasicBlock* B1, llvm::Instruction* Inst2, llvm::BasicBlock* B2, std::unordered_map<llvm::Value*, llvm::PHINode*>& instToPhi, std::unordered_map<llvm::PHINode*, llvm::Value*>& phiToInst);
     void updateBranchesToBlock(llvm::BasicBlock* BToErase, llvm::BasicBlock* BToRetain);
 
@@ -34,8 +42,5 @@ struct MergeB : public llvm::PassInfoMixin<MergeB> {
 
     unsigned int removeZeroUseInstructions(llvm::Function& F);
 };
-
-unsigned int countNonDbgInstrInB(llvm::BasicBlock* B);
-bool hasPredecessors(llvm::BasicBlock* B);
 
 #endif// __MERGE_B

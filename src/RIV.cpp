@@ -1,45 +1,12 @@
-//=============================================================================
-// FILE:
-//    RIV.cpp
-//
-// DESCRIPTION:
-//    For every basic block  in the input function, this pass creates a list of
-//    integer values reachable from that block. It uses the results of the
-//    DominatorTree pass.
-//
-// ALGORITHM:
-//    -------------------------------------------------------------------------
-//    v_N = set of integer values defined in basic block N (BB_N)
-//    RIV_N = set of reachable integer values for basic block N (BB_N)
-//    -------------------------------------------------------------------------
-//    STEP 1:
-//    For every BB_N in F:
-//      compute v_N and store it in DefinedValuesMap
-//    -------------------------------------------------------------------------
-//    STEP 2:
-//    Compute the RIVs for the entry block (BB_0):
-//      RIV_0 = {input args, global vars}
-//    -------------------------------------------------------------------------
-//    STEP 3: Traverse the CFG and for every BB_M that BB_N dominates,
-//    calculate RIV_M as follows:
-//      RIV_M = {RIV_N, v_N}
-//    -------------------------------------------------------------------------
-//
-// REFERENCES:
-//    Based on examples from:
-//    "Building, Testing and Debugging a Simple out-of-tree LLVM Pass", Serge
-//    Guelton and Adrien Guinet, LLVM Dev Meeting 2015
-//
-// License: MIT
-//=============================================================================
+#define _BUILD_RIV
 #include "RIV.h"
 
 #include "llvm/IR/Module.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/Format.h"
 
 #include <deque>
+#include <iostream>
 
 using namespace llvm;
 
@@ -115,50 +82,19 @@ RIV::Result RIV::buildRIV(Function &F, NodeTy CFGRoot) {
 }
 
 RIV::Result RIV::run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
+  llvm::errs() << "RIV: test1\n";
   DominatorTree *DT = &FAM.getResult<DominatorTreeAnalysis>(F);
+  llvm::errs() << "RIV: test2\n";
   Result Res = buildRIV(F, DT->getRootNode());
+  llvm::errs() << "RIV: test3\n";
 
   return Res;
 }
 
-PreservedAnalyses RIVPrinter::run(Function &Func,
-                                  FunctionAnalysisManager &FAM) {
-
-  auto RIVMap = FAM.getResult<RIV>(Func);
-
+PreservedAnalyses RIVPrinter::run(Function &Func, FunctionAnalysisManager &FAM) {
+  const RIV::Result& RIVMap = FAM.getResult<RIV>(Func);
   printRIVResult(OS, RIVMap);
   return PreservedAnalyses::all();
-}
-
-//-----------------------------------------------------------------------------
-// New PM Registration
-//-----------------------------------------------------------------------------
-AnalysisKey RIV::Key;
-
-llvm::PassPluginLibraryInfo getRIVPluginInfo() {
-  return {LLVM_PLUGIN_API_VERSION, "riv", LLVM_VERSION_STRING,
-          [](PassBuilder &PB) {
-            // #1 REGISTRATION FOR "opt -passes=print<riv>"
-            PB.registerPipelineParsingCallback(
-                [&](StringRef Name, FunctionPassManager &FPM,
-                    ArrayRef<PassBuilder::PipelineElement>) {
-                  if (Name == "print<riv>") {
-                    FPM.addPass(RIVPrinter(llvm::errs()));
-                    return true;
-                  }
-                  return false;
-                });
-            // #2 REGISTRATION FOR "FAM.getResult<RIV>(Function)"
-            PB.registerAnalysisRegistrationCallback(
-                [](FunctionAnalysisManager &FAM) {
-                  FAM.registerPass([&] { return RIV(); });
-                });
-          }};
-};
-
-extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
-llvmGetPassPluginInfo() {
-  return getRIVPluginInfo();
 }
 
 //------------------------------------------------------------------------------
@@ -190,4 +126,35 @@ static void printRIVResult(raw_ostream &OutS, const RIV::Result &RIVMap) {
   }
 
   OutS << "\n\n";
+}
+
+AnalysisKey RIV::Key;
+llvm::PassPluginLibraryInfo getRIVPluginInfo() {
+	return llvm::PassPluginLibraryInfo{
+    LLVM_PLUGIN_API_VERSION, "riv", LLVM_VERSION_STRING,
+    [](llvm::PassBuilder& passBuilder) {
+      passBuilder.registerAnalysisRegistrationCallback(
+        [](llvm::FunctionAnalysisManager &FAM) {
+          FAM.registerPass([] { return RIV(); });
+        }
+      );
+      passBuilder.registerPipelineParsingCallback(
+          [](
+            llvm::StringRef Name, llvm::FunctionPassManager& FPM,
+            llvm::ArrayRef<llvm::PassBuilder::PipelineElement>
+          ) {
+            if (Name == "print<riv>") {
+              FPM.addPass(RIVPrinter(llvm::errs()));
+              return true;
+            }
+            return false;
+          }
+      );
+    }
+  };
+}
+#pragma comment(linker, "/EXPORT:llvmGetPassPluginInfo")
+extern "C"
+llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
+	return getRIVPluginInfo();
 }
